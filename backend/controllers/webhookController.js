@@ -1,7 +1,7 @@
-const Customer = require('../models/Customer');
-const Conversation = require('../models/Conversation');
-const messengerService = require('../services/messengerService');
-const aiService = require('../services/aiService');
+const Customer = require("../models/Customer");
+const Conversation = require("../models/Conversation");
+const messengerService = require("../services/messengerService");
+const aiService = require("../services/aiService");
 
 /**
  * Webhook Verification (GET request from Facebook)
@@ -11,24 +11,24 @@ exports.verifyWebhook = (req, res) => {
   const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN;
 
   // Parse params from the webhook verification request
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
 
   // Check if a token and mode were sent
   if (mode && token) {
     // Check the mode and token sent are correct
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
       // Respond with 200 OK and challenge token from the request
-      console.log('✅ Webhook verified successfully!');
+      console.log("✅ Webhook verified successfully!");
       res.status(200).send(challenge);
     } else {
       // Responds with '403 Forbidden' if verify tokens do not match
-      console.error('❌ Webhook verification failed - Invalid token');
+      console.error("❌ Webhook verification failed - Invalid token");
       res.sendStatus(403);
     }
   } else {
-    console.error('❌ Webhook verification failed - Missing parameters');
+    console.error("❌ Webhook verification failed - Missing parameters");
     res.sendStatus(400);
   }
 };
@@ -41,27 +41,33 @@ exports.handleWebhook = async (req, res) => {
   const body = req.body;
 
   // Check if this is an event from a page subscription
-  if (body.object === 'page') {
+  if (body.object === "page") {
     // Return 200 OK immediately to Facebook
-    res.status(200).send('EVENT_RECEIVED');
+    res.status(200).send("EVENT_RECEIVED");
 
     // Process each entry (can be multiple if batched)
-    body.entry.forEach(async (entry) => {
-      // Get the webhook event
-      const webhookEvent = entry.messaging[0];
-      
-      // Get the sender PSID (Page-Scoped ID)
-      const senderPsid = webhookEvent.sender.id;
+    try {
+      await Promise.all(
+        body.entry.map(async (entry) => {
+          // Get the webhook event
+          const webhookEvent = entry.messaging[0];
 
-      console.log(`📨 Received message from sender: ${senderPsid}`);
+          // Get the sender PSID (Page-Scoped ID)
+          const senderPsid = webhookEvent.sender.id;
 
-      // Check if the event is a message or postback
-      if (webhookEvent.message) {
-        await handleMessage(senderPsid, webhookEvent.message);
-      } else if (webhookEvent.postback) {
-        await handlePostback(senderPsid, webhookEvent.postback);
-      }
-    });
+          console.log(`📨 Received message from sender: ${senderPsid}`);
+
+          // Check if the event is a message or postback
+          if (webhookEvent.message) {
+            await handleMessage(senderPsid, webhookEvent.message);
+          } else if (webhookEvent.postback) {
+            await handlePostback(senderPsid, webhookEvent.postback);
+          }
+        }),
+      );
+    } catch (error) {
+      console.error("❌ Error processing entries:", error);
+    }
   } else {
     // Return 404 Not Found if event is not from a page subscription
     res.sendStatus(404);
@@ -92,12 +98,12 @@ async function handleMessage(senderPsid, receivedMessage) {
         conversation = new Conversation({
           customer: customer._id,
           facebookConversationId: senderPsid,
-          currentIntent: 'ordering',
+          currentIntent: "ordering",
         });
       }
 
       // Add customer message to conversation
-      await conversation.addMessage('customer', messageText);
+      await conversation.addMessage("customer", messageText);
 
       // Send typing indicator
       await messengerService.sendTypingIndicator(senderPsid, true);
@@ -105,17 +111,20 @@ async function handleMessage(senderPsid, receivedMessage) {
       // Process message with AI to detect if it's an order
       const aiResult = await aiService.extractOrderFromMessage(messageText);
 
-      console.log('🤖 AI Extraction Result:', JSON.stringify(aiResult, null, 2));
+      console.log(
+        "🤖 AI Extraction Result:",
+        JSON.stringify(aiResult, null, 2),
+      );
 
       // Check if AI detected an order
       if (aiResult.isOrder && aiResult.confidence > 0.6) {
         // Create order (will be handled in Phase 2)
         response = {
-          text: `✅ Баярлалаа! Таны захиалгыг хүлээн авлаа.\n\n📦 Бараа: ${aiResult.data.item_name || 'Тодорхойгүй'}\n📞 Утас: ${aiResult.data.phone_number || 'Тодорхойгүй'}\n📍 Хаяг: ${aiResult.data.address || 'Тодорхойгүй'}\n\nМанай ажилтан удахгүй холбогдох болно! 🙏`,
+          text: `✅ Баярлалаа! Таны захиалгыг хүлээн авлаа.\n\n📦 Бараа: ${aiResult.data.item_name || "Тодорхойгүй"}\n📞 Утас: ${aiResult.data.phone_number || "Тодорхойгүй"}\n📍 Хаяг: ${aiResult.data.address || "Тодорхойгүй"}\n\nМанай ажилтан удахгүй холбогдох болно! 🙏`,
         };
 
-        // Update conversation intent
-        conversation.currentIntent = 'order_created';
+        // Update conversation status
+        conversation.status = "order_created";
         conversation.aiContext = aiResult;
         await conversation.save();
 
@@ -123,20 +132,20 @@ async function handleMessage(senderPsid, receivedMessage) {
       } else if (aiResult.needsMoreInfo) {
         // Ask for missing information
         const missingFields = aiResult.missingFields || [];
-        let askText = '🤔 Захиалга өгөхийн тулд дараах мэдээллийг өгнө үү:\n\n';
-        
-        if (missingFields.includes('item_name')) {
-          askText += '📦 Ямар бараа авах вэ?\n';
+        let askText = "🤔 Захиалга өгөхийн тулд дараах мэдээллийг өгнө үү:\n\n";
+
+        if (missingFields.includes("item_name")) {
+          askText += "📦 Ямар бараа авах вэ?\n";
         }
-        if (missingFields.includes('phone_number')) {
-          askText += '📞 Утасны дугаараа өгнө үү?\n';
+        if (missingFields.includes("phone_number")) {
+          askText += "📞 Утасны дугаараа өгнө үү?\n";
         }
-        if (missingFields.includes('address')) {
-          askText += '📍 Хаягаа өгнө үү?\n';
+        if (missingFields.includes("address")) {
+          askText += "📍 Хаягаа өгнө үү?\n";
         }
 
         response = { text: askText };
-        conversation.status = 'waiting_for_info';
+        conversation.status = "waiting_for_info";
         await conversation.save();
       } else {
         // General inquiry or browsing
@@ -146,7 +155,7 @@ async function handleMessage(senderPsid, receivedMessage) {
       }
 
       // Add bot response to conversation
-      await conversation.addMessage('bot', response.text);
+      await conversation.addMessage("bot", response.text);
 
       // Turn off typing indicator
       await messengerService.sendTypingIndicator(senderPsid, false);
@@ -156,17 +165,24 @@ async function handleMessage(senderPsid, receivedMessage) {
     } else if (receivedMessage.attachments) {
       // Handle attachments (images, etc.)
       response = {
-        text: '📷 Зураг хүлээн авлаа! Захиалгын мэдээллээ текстээр илгээнэ үү.',
+        text: "📷 Зураг хүлээн авлаа! Захиалгын мэдээллээ текстээр илгээнэ үү.",
       };
       await messengerService.sendMessage(senderPsid, response);
     }
   } catch (error) {
-    console.error('❌ Error handling message:', error);
-    
-    // Send error message to user
-    await messengerService.sendMessage(senderPsid, {
-      text: '😔 Уучлаарай, алдаа гарлаа. Дахин оролдоно уу.',
-    });
+    console.error("❌ Error handling message:", error);
+
+    // Send error message to user - wrapped in try-catch to prevent crash on invalid PSID
+    try {
+      await messengerService.sendMessage(senderPsid, {
+        text: "😔 Уучлаарай, алдаа гарлаа. Дахин оролдоно уу.",
+      });
+    } catch (sendError) {
+      console.error(
+        "❌ Failed to send error message to user:",
+        sendError.message,
+      );
+    }
   }
 }
 
@@ -182,25 +198,25 @@ async function handlePostback(senderPsid, receivedPostback) {
 
     // Handle different postback payloads
     switch (payload) {
-      case 'GET_STARTED':
+      case "GET_STARTED":
         response = {
-          text: '👋 Тавтай морил! Би таны захиалгыг хүлээн авах туслах бот юм. Захиалга өгөхийг хүсвэл мэдээллээ илгээнэ үү!',
+          text: "👋 Тавтай морил! Би таны захиалгыг хүлээн авах туслах бот юм. Захиалга өгөхийг хүсвэл мэдээллээ илгээнэ үү!",
         };
         break;
-      case 'VIEW_CATALOG':
+      case "VIEW_CATALOG":
         response = {
-          text: '📦 Манай бүтээгдэхүүнүүдийг үзэхийг хүсвэл холбоо барина уу!',
+          text: "📦 Манай бүтээгдэхүүнүүдийг үзэхийг хүсвэл холбоо барина уу!",
         };
         break;
       default:
         response = {
-          text: 'Тодорхойгүй команд байна.',
+          text: "Тодорхойгүй команд байна.",
         };
     }
 
     await messengerService.sendMessage(senderPsid, response);
   } catch (error) {
-    console.error('❌ Error handling postback:', error);
+    console.error("❌ Error handling postback:", error);
   }
 }
 
@@ -217,7 +233,7 @@ async function findOrCreateCustomer(facebookId) {
 
       customer = new Customer({
         facebookId,
-        name: userInfo.name || 'Unknown User',
+        name: userInfo.name || "Unknown User",
       });
 
       await customer.save();
@@ -228,7 +244,7 @@ async function findOrCreateCustomer(facebookId) {
 
     return customer;
   } catch (error) {
-    console.error('❌ Error finding/creating customer:', error);
+    console.error("❌ Error finding/creating customer:", error);
     throw error;
   }
 }
