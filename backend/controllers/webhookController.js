@@ -1,5 +1,6 @@
 const Customer = require("../models/Customer");
 const Conversation = require("../models/Conversation");
+const Order = require("../models/Order");
 const messengerService = require("../services/messengerService");
 const aiService = require("../services/aiService");
 
@@ -118,7 +119,37 @@ async function handleMessage(senderPsid, receivedMessage) {
 
       // Check if AI detected an order
       if (aiResult.isOrder && aiResult.confidence > 0.6) {
-        // Create order (will be handled in Phase 2)
+        // Prepare order data
+        const orderData = {
+          customer: customer._id,
+          conversation: conversation._id,
+          phoneNumber: aiResult.data.phone_number || "99999999", // Fallback if missing but still an order
+          address: aiResult.data.address || "Хаяг тодорхойгүй",
+          items: [
+            {
+              itemName: aiResult.data.item_name || "Бараа тодорхойгүй",
+              quantity: aiResult.data.quantity || 1,
+              price: 0, // Will be updated by admin
+            },
+          ],
+          totalAmount: 0,
+          aiExtraction: {
+            rawMessage: messageText,
+            extractedData: aiResult.data,
+            confidence: aiResult.confidence,
+            needsReview:
+              aiResult.needsMoreInfo ||
+              !aiResult.data.phone_number ||
+              !aiResult.data.address,
+          },
+          status: "pending",
+        };
+
+        // Create and save Order
+        const order = new Order(orderData);
+        await order.save();
+        console.log(`✅ Order created in DB: ${order._id}`);
+
         response = {
           text: `✅ Баярлалаа! Таны захиалгыг хүлээн авлаа.\n\n📦 Бараа: ${aiResult.data.item_name || "Тодорхойгүй"}\n📞 Утас: ${aiResult.data.phone_number || "Тодорхойгүй"}\n📍 Хаяг: ${aiResult.data.address || "Тодорхойгүй"}\n\nМанай ажилтан удахгүй холбогдох болно! 🙏`,
         };
@@ -127,8 +158,6 @@ async function handleMessage(senderPsid, receivedMessage) {
         conversation.status = "order_created";
         conversation.aiContext = aiResult;
         await conversation.save();
-
-        // TODO: Create Order in database (Phase 2)
       } else if (aiResult.needsMoreInfo) {
         // Ask for missing information
         const missingFields = aiResult.missingFields || [];
