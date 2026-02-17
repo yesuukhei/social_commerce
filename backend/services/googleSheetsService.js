@@ -53,26 +53,40 @@ class GoogleSheetsService {
 
       const sheet = this.doc.sheetsByIndex[0]; // Assumes first sheet
 
-      // Create row data
+      // Load the header row to verify
+      await sheet.loadHeaderRow();
+      console.log("📊 Sheet Headers found:", sheet.headerValues);
+
+      // Create row data - simplified keys to match exactly
       const rowData = {
         Огноо: new Date(order.createdAt).toLocaleString("mn-MN"),
         "Захиалгын ID": order._id.toString(),
         Үйлчлүүлэгч: order.customer?.name || "Unknown",
-        Утас: order.phoneNumber,
-        Хаяг: order.address,
+        Утас: order.phoneNumber || "",
+        Хаяг: order.address || "",
         Бараа: order.items
-          .map((item) => `${item.itemName} (${item.quantity})`)
-          .join(", "),
+          ? order.items
+              .map((item) => `${item.itemName} (${item.quantity})`)
+              .join(", ")
+          : "",
         "Нийт дүн": order.totalAmount || 0,
-        Төлөв: order.status,
+        Төлөв: order.status || "pending",
         "AI Confidence": order.aiExtraction?.confidence || 0,
         Notes: order.notes || "",
       };
 
+      console.log(
+        "📝 Attempting to add row:",
+        JSON.stringify(rowData, null, 2),
+      );
+
       await sheet.addRow(rowData);
-      console.log(`📊 Order ${order._id} synced to Google Sheets`);
+      console.log(`✅ Order ${order._id} synced to Google Sheets successfully`);
     } catch (error) {
       console.error("❌ Error syncing to Google Sheets:", error.message);
+      if (error.response) {
+        console.error("API Error Data:", error.response.data);
+      }
     }
   }
 }

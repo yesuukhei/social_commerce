@@ -1,4 +1,4 @@
-const OpenAI = require('openai');
+const OpenAI = require("openai");
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -43,32 +43,32 @@ exports.extractOrderFromMessage = async (messageText) => {
 }`;
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: "gpt-4o-mini",
       messages: [
         {
-          role: 'system',
+          role: "system",
           content: systemPrompt,
         },
         {
-          role: 'user',
+          role: "user",
           content: messageText,
         },
       ],
       temperature: 0.3,
-      response_format: { type: 'json_object' },
+      response_format: { type: "json_object" },
     });
 
     const result = JSON.parse(completion.choices[0].message.content);
 
-    console.log('🤖 AI Extraction:', {
-      input: messageText,
-      output: result,
-      tokens: completion.usage,
-    });
+    // console.log('🤖 AI Extraction:', {
+    //   input: messageText,
+    //   output: result,
+    //   tokens: completion.usage,
+    // });
 
     return result;
   } catch (error) {
-    console.error('❌ Error in AI extraction:', error);
+    console.error("❌ Error in AI extraction:", error);
 
     // Return safe fallback
     return {
@@ -81,7 +81,7 @@ exports.extractOrderFromMessage = async (messageText) => {
         address: null,
       },
       needsMoreInfo: true,
-      missingFields: ['item_name', 'quantity', 'phone_number', 'address'],
+      missingFields: ["item_name", "quantity", "phone_number", "address"],
       error: error.message,
     };
   }
@@ -105,14 +105,14 @@ exports.detectIntent = async (messageText) => {
 Хариултаа зөвхөн нэг үг буцаа: ordering, inquiry, complaint, эсвэл browsing`;
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: "gpt-4o-mini",
       messages: [
         {
-          role: 'system',
+          role: "system",
           content: systemPrompt,
         },
         {
-          role: 'user',
+          role: "user",
           content: messageText,
         },
       ],
@@ -123,8 +123,8 @@ exports.detectIntent = async (messageText) => {
     const intent = completion.choices[0].message.content.trim().toLowerCase();
     return intent;
   } catch (error) {
-    console.error('❌ Error detecting intent:', error);
-    return 'browsing';
+    console.error("❌ Error detecting intent:", error);
+    return "browsing";
   }
 };
 
@@ -145,14 +145,14 @@ exports.generateResponse = async (context, userMessage) => {
 - Захиалгын мэдээлэл дутуу бол асууж тодруулах`;
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: "gpt-4o-mini",
       messages: [
         {
-          role: 'system',
+          role: "system",
           content: systemPrompt,
         },
         {
-          role: 'user',
+          role: "user",
           content: `Контекст: ${context}\n\nХэрэглэгчийн мессеж: ${userMessage}`,
         },
       ],
@@ -162,8 +162,8 @@ exports.generateResponse = async (context, userMessage) => {
 
     return completion.choices[0].message.content;
   } catch (error) {
-    console.error('❌ Error generating response:', error);
-    return 'Уучлаарай, алдаа гарлаа. Дахин оролдоно уу.';
+    console.error("❌ Error generating response:", error);
+    return "Уучлаарай, алдаа гарлаа. Дахин оролдоно уу.";
   }
 };
 
@@ -176,7 +176,7 @@ exports.validatePhoneNumber = (phoneNumber) => {
   if (!phoneNumber) return false;
 
   // Remove spaces, dashes, and other non-digit characters
-  const cleaned = phoneNumber.replace(/\D/g, '');
+  const cleaned = phoneNumber.replace(/\D/g, "");
 
   // Mongolian phone numbers are 8 digits
   return cleaned.length === 8 && /^[6-9]\d{7}$/.test(cleaned);
@@ -191,7 +191,7 @@ exports.normalizePhoneNumber = (phoneNumber) => {
   if (!phoneNumber) return null;
 
   // Remove all non-digit characters
-  const cleaned = phoneNumber.replace(/\D/g, '');
+  const cleaned = phoneNumber.replace(/\D/g, "");
 
   // Return 8-digit format
   if (cleaned.length === 8) {
