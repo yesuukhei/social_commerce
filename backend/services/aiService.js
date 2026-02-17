@@ -5,42 +5,47 @@ const openai = new OpenAI({
 });
 
 /**
- * Extract order information from Mongolian text message
- * @param {string} messageText - Customer's message in Mongolian
- * @returns {object} Extracted order data with confidence score
+ * Unified AI service to process text messages
+ * Detects intent, extracts order info, and generates response context in one call
+ * @param {string} messageText - Customer's message
+ * @param {Array} history - Brief conversation history for context
+ * @returns {object} Extracted data and response logic
  */
-exports.extractOrderFromMessage = async (messageText) => {
+exports.processMessage = async (messageText, history = []) => {
   try {
-    const systemPrompt = `Чи бол Монголын онлайн дэлгүүрийн туслах бот. Хэрэглэгчийн мессежнээс захиалгын мэдээллийг задлан шинжилж, JSON форматаар гаргаж өг.
+    const formattedHistory = history
+      .map((h) => `${h.sender === "customer" ? "User" : "Bot"}: ${h.text}`)
+      .join("\n");
 
-Дараах мэдээллийг олж ав:
-- item_name: Бараа/бүтээгдэхүүний нэр (Монгол хэлээр)
-- quantity: Тоо ширхэг (тоогоор)
-- phone_number: Утасны дугаар (8 оронтой)
-- address: Хүргэх хаяг (дүүрэг, хороо, байр гэх мэт)
+    const systemPrompt = `Чи бол Монголын онлайн дэлгүүрийн ухаалаг туслах бот.
+ҮҮРЭГ: Хэрэглэгчийн мессежнээс зорилго (intent) болон захиалгын мэдээллийг задлан шинжлэх.
 
-Монгол хэлний хар яриа, товчлол, алдаатай бичиглэлийг ойлгож ажилла.
+ДҮРЭМ:
+1. Латин галигаар бичсэн бол (жишээ нь: "tsamts avya") кирилл рүү хөрвүүлж ойлго.
+2. Товчлолыг (БЗД, ХУД, СХД, 1-р хороо) бүтэн нэршил рүү хөрвүүл (Баянзүрх дүүрэг гэх мэт).
+3. Хэрэв хэрэглэгч олон төрлийн бараа бичсэн бол 'items' хүснэгтэд салгаж бич.
+4. 'confidence' оноог 0.0-1.0 хооронд өг.
 
-Жишээ нь:
-- "2 ширхэг цамц авмаар байна" → quantity: 2, item_name: "цамц"
-- "99119911" эсвэл "9911-9911" → phone_number: "99119911"
-- "БЗД, 1-р хороо" → address: "Баянзүрх дүүрэг, 1-р хороо"
-
-Хэрэв мэдээлэл дутуу бол null гэж тэмдэглэ.
-
-Хариултаа зөвхөн JSON форматаар өг:
+JSON БҮТЭЦ:
 {
-  "isOrder": true/false,
-  "confidence": 0.0-1.0,
+  "intent": "ordering | inquiry | complaint | browsing",
+  "isOrderReady": true/false,
+  "confidence": number,
   "data": {
-    "item_name": "...",
-    "quantity": number,
-    "phone_number": "...",
-    "address": "..."
+    "items": [{ "name": string, "quantity": number, "size": string, "color": string }],
+    "phone": string,
+    "address": {
+       "district": string,
+       "khoroo": string,
+       "detail": string
+    },
+    "full_address": string,
+    "payment_method": "qpay | cash | transfer | null"
   },
-  "needsMoreInfo": true/false,
-  "missingFields": ["field1", "field2"]
-}`;
+  "missingFields": ["phone", "address", "items"]
+}
+
+Хэрэв өмнөх ярианы контекст (History) байгаа бол түүнийг ашиглан "тэрийг авъя", "тийн" гэх мэт үгсийг юуг зааж байгааг тодорхойл.`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -51,98 +56,51 @@ exports.extractOrderFromMessage = async (messageText) => {
         },
         {
           role: "user",
-          content: messageText,
+          content: `Өмнөх яриа:\n${formattedHistory}\n\nШинэ мессеж: ${messageText}`,
         },
       ],
-      temperature: 0.3,
+      temperature: 0.2,
       response_format: { type: "json_object" },
     });
 
     const result = JSON.parse(completion.choices[0].message.content);
 
-    // console.log('🤖 AI Extraction:', {
-    //   input: messageText,
-    //   output: result,
-    //   tokens: completion.usage,
-    // });
+    console.log("🤖 AI Processed:", {
+      intent: result.intent,
+      isOrder: result.isOrderReady,
+      confidence: result.confidence,
+    });
 
     return result;
   } catch (error) {
-    console.error("❌ Error in AI extraction:", error);
-
-    // Return safe fallback
+    console.error("❌ Error in AI processing:", error);
     return {
-      isOrder: false,
+      intent: "other",
+      isOrderReady: false,
       confidence: 0,
-      data: {
-        item_name: null,
-        quantity: null,
-        phone_number: null,
-        address: null,
-      },
-      needsMoreInfo: true,
-      missingFields: ["item_name", "quantity", "phone_number", "address"],
-      error: error.message,
+      data: { items: [], phone: null, full_address: null },
+      missingFields: ["items"],
     };
   }
 };
 
 /**
- * Analyze conversation intent
- * @param {string} messageText - Customer's message
- * @returns {string} Intent type: 'ordering', 'inquiry', 'complaint', 'browsing'
- */
-exports.detectIntent = async (messageText) => {
-  try {
-    const systemPrompt = `Монгол хэлний мессежийг уншиж, хэрэглэгчийн зорилгыг тодорхойл.
-
-Зорилгын төрлүүд:
-- "ordering": Захиалга өгөх гэж байна
-- "inquiry": Асуулт асууж байна (үнэ, хүргэлт гэх мэт)
-- "complaint": Гомдол гаргаж байна
-- "browsing": Зүгээр л харж байна
-
-Хариултаа зөвхөн нэг үг буцаа: ordering, inquiry, complaint, эсвэл browsing`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: messageText,
-        },
-      ],
-      temperature: 0.2,
-      max_tokens: 10,
-    });
-
-    const intent = completion.choices[0].message.content.trim().toLowerCase();
-    return intent;
-  } catch (error) {
-    console.error("❌ Error detecting intent:", error);
-    return "browsing";
-  }
-};
-
-/**
  * Generate a friendly response in Mongolian
- * @param {string} context - Context of the conversation
- * @param {string} userMessage - User's message
+ * @param {object} aiResult - Result from processMessage
+ * @param {string} userMessage - User's original message
  * @returns {string} Generated response
  */
-exports.generateResponse = async (context, userMessage) => {
+exports.generateResponse = async (aiResult, userMessage) => {
   try {
-    const systemPrompt = `Чи бол Монголын онлайн дэлгүүрийн найрсаг туслах бот. Хэрэглэгчтэй эелдэг, ойлгомжтой харилцаж, захиалга өгөхөд нь туслаарай.
+    const systemPrompt = `Чи бол Монголын онлайн дэлгүүрийн найрсаг туслах бот.
+AI-ийн задалсан үр дүнд тулгуурлан хэрэглэгчид товч бөгөөд найрсаг хариулт өг.
 
-Дүрэм:
-- Монгол хэлээр хариулах
-- Товч бөгөөд тодорхой байх
-- Emoji ашиглаж, найрсаг байх
-- Захиалгын мэдээлэл дутуу бол асууж тодруулах`;
+Хэрэв:
+1. Захиалга бэлэн бол: Баярлалаа гээд мэдээллийг нь баталгаажуулж харуул. 
+2. Мэдээлэл дутуу бол: Яг аль нь дутуу байгааг эелдэгээр асуу.
+3. Зүгээр асуулт бол: Найрсаг хариулт өг.
+
+Монгол хэлээр, emoji ашиглан хариул.`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -153,11 +111,11 @@ exports.generateResponse = async (context, userMessage) => {
         },
         {
           role: "user",
-          content: `Контекст: ${context}\n\nХэрэглэгчийн мессеж: ${userMessage}`,
+          content: `AI Result: ${JSON.stringify(aiResult)}\nUser Message: ${userMessage}`,
         },
       ],
       temperature: 0.7,
-      max_tokens: 200,
+      max_tokens: 300,
     });
 
     return completion.choices[0].message.content;
@@ -174,11 +132,7 @@ exports.generateResponse = async (context, userMessage) => {
  */
 exports.validatePhoneNumber = (phoneNumber) => {
   if (!phoneNumber) return false;
-
-  // Remove spaces, dashes, and other non-digit characters
   const cleaned = phoneNumber.replace(/\D/g, "");
-
-  // Mongolian phone numbers are 8 digits
   return cleaned.length === 8 && /^[6-9]\d{7}$/.test(cleaned);
 };
 
@@ -189,14 +143,7 @@ exports.validatePhoneNumber = (phoneNumber) => {
  */
 exports.normalizePhoneNumber = (phoneNumber) => {
   if (!phoneNumber) return null;
-
-  // Remove all non-digit characters
   const cleaned = phoneNumber.replace(/\D/g, "");
-
-  // Return 8-digit format
-  if (cleaned.length === 8) {
-    return cleaned;
-  }
-
+  if (cleaned.length === 8) return cleaned;
   return null;
 };

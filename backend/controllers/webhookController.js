@@ -100,9 +100,12 @@ async function handleMessage(senderPsid, receivedMessage) {
         conversation = new Conversation({
           customer: customer._id,
           facebookConversationId: senderPsid,
-          currentIntent: "ordering",
+          currentIntent: "browsing",
         });
       }
+
+      // Get brief history (last 5 messages) for AI context
+      const history = conversation.messages.slice(-5);
 
       // Add customer message to conversation
       await conversation.addMessage("customer", messageText);
@@ -110,38 +113,35 @@ async function handleMessage(senderPsid, receivedMessage) {
       // Send typing indicator
       await messengerService.sendTypingIndicator(senderPsid, true);
 
-      // Process message with AI to detect if it's an order
-      const aiResult = await aiService.extractOrderFromMessage(messageText);
+      // Process message with Unified AI
+      const aiResult = await aiService.processMessage(messageText, history);
 
-      console.log(
-        "🤖 AI Extraction Result:",
-        JSON.stringify(aiResult, null, 2),
-      );
+      // Update conversation intent
+      conversation.currentIntent = aiResult.intent || "browsing";
 
-      // Check if AI detected an order
-      if (aiResult.isOrder && aiResult.confidence > 0.6) {
-        // Prepare order data
+      // Check if AI detected an order readiness
+      if (
+        aiResult.intent === "ordering" &&
+        aiResult.isOrderReady &&
+        aiResult.confidence > 0.6
+      ) {
+        // Prepare order data with MULTIPLE items
         const orderData = {
           customer: customer._id,
           conversation: conversation._id,
-          phoneNumber: aiResult.data.phone_number || "99999999", // Fallback if missing but still an order
-          address: aiResult.data.address || "Хаяг тодорхойгүй",
-          items: [
-            {
-              itemName: aiResult.data.item_name || "Бараа тодорхойгүй",
-              quantity: aiResult.data.quantity || 1,
-              price: 0, // Will be updated by admin
-            },
-          ],
+          phoneNumber: aiResult.data.phone || "99999999",
+          address: aiResult.data.full_address || "Хаяг тодорхойгүй",
+          items: aiResult.data.items.map((item) => ({
+            itemName: item.name || "Бараа",
+            quantity: item.quantity || 1,
+            price: 0, // Default
+          })),
           totalAmount: 0,
           aiExtraction: {
             rawMessage: messageText,
             extractedData: aiResult.data,
             confidence: aiResult.confidence,
-            needsReview:
-              aiResult.needsMoreInfo ||
-              !aiResult.data.phone_number ||
-              !aiResult.data.address,
+            needsReview: !aiResult.data.phone || !aiResult.data.full_address,
           },
           status: "pending",
         };
@@ -161,38 +161,30 @@ async function handleMessage(senderPsid, receivedMessage) {
             console.error("❌ Google Sheets sync failed:", err.message),
           );
 
-        response = {
-          text: `✅ Баярлалаа! Таны захиалгыг хүлээн авлаа.\n\n📦 Бараа: ${aiResult.data.item_name || "Тодорхойгүй"}\n📞 Утас: ${aiResult.data.phone_number || "Тодорхойгүй"}\n📍 Хаяг: ${aiResult.data.address || "Тодорхойгүй"}\n\nМанай ажилтан удахгүй холбогдох болно! 🙏`,
-        };
+        // Generate Confirmation Response
+        const replyText = await aiService.generateResponse(
+          aiResult,
+          messageText,
+        );
+        response = { text: replyText };
 
         // Update conversation status
         conversation.status = "order_created";
         conversation.aiContext = aiResult;
-        await conversation.save();
-      } else if (aiResult.needsMoreInfo) {
-        // Ask for missing information
-        const missingFields = aiResult.missingFields || [];
-        let askText = "🤔 Захиалга өгөхийн тулд дараах мэдээллийг өгнө үү:\n\n";
-
-        if (missingFields.includes("item_name")) {
-          askText += "📦 Ямар бараа авах вэ?\n";
-        }
-        if (missingFields.includes("phone_number")) {
-          askText += "📞 Утасны дугаараа өгнө үү?\n";
-        }
-        if (missingFields.includes("address")) {
-          askText += "📍 Хаягаа өгнө үү?\n";
-        }
-
-        response = { text: askText };
-        conversation.status = "waiting_for_info";
-        await conversation.save();
       } else {
-        // General inquiry or browsing
-        response = {
-          text: '👋 Сайн байна уу! Захиалга өгөхийг хүсвэл дараах мэдээллийг илгээнэ үү:\n\n📦 Бараа\n🔢 Тоо ширхэг\n📞 Утасны дугаар\n📍 Хүргэх хаяг\n\nЖишээ: "2 ширхэг цамц авмаар байна, 99119911, Баянзүрх дүүрэг"',
-        };
+        // Handle inquiry, browsing, or missing info
+        const replyText = await aiService.generateResponse(
+          aiResult,
+          messageText,
+        );
+        response = { text: replyText };
+
+        if (aiResult.intent === "ordering" && !aiResult.isOrderReady) {
+          conversation.status = "waiting_for_info";
+        }
       }
+
+      await conversation.save();
 
       // Add bot response to conversation
       await conversation.addMessage("bot", response.text);
