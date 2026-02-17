@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const orderItemSchema = new mongoose.Schema({
   itemName: {
@@ -18,6 +18,11 @@ const orderItemSchema = new mongoose.Schema({
     type: Number,
     min: 0,
   },
+  attributes: {
+    type: Map,
+    of: String,
+    default: {},
+  },
 });
 
 const orderSchema = new mongoose.Schema(
@@ -25,7 +30,13 @@ const orderSchema = new mongoose.Schema(
     // Customer reference
     customer: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Customer',
+      ref: "Customer",
+      required: true,
+      index: true,
+    },
+    store: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Store",
       required: true,
       index: true,
     },
@@ -43,8 +54,15 @@ const orderSchema = new mongoose.Schema(
     // Order status
     status: {
       type: String,
-      enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'],
-      default: 'pending',
+      enum: [
+        "pending",
+        "confirmed",
+        "processing",
+        "shipped",
+        "delivered",
+        "cancelled",
+      ],
+      default: "pending",
       index: true,
     },
     // Financial information
@@ -82,7 +100,7 @@ const orderSchema = new mongoose.Schema(
     // Conversation reference
     conversation: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Conversation',
+      ref: "Conversation",
     },
     // Notes
     notes: {
@@ -97,16 +115,17 @@ const orderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Indexes for common queries
 orderSchema.index({ status: 1, createdAt: -1 });
-orderSchema.index({ 'aiExtraction.needsReview': 1 });
+orderSchema.index({ "aiExtraction.needsReview": 1 });
 orderSchema.index({ customer: 1, createdAt: -1 });
+orderSchema.index({ phoneNumber: 1 }); // Keeping only one if it was duplicated
 
 // Calculate total before saving
-orderSchema.pre('save', function (next) {
+orderSchema.pre("save", function (next) {
   if (this.items && this.items.length > 0) {
     this.totalAmount = this.items.reduce((total, item) => {
       const subtotal = (item.price || 0) * item.quantity;
@@ -117,6 +136,6 @@ orderSchema.pre('save', function (next) {
   next();
 });
 
-const Order = mongoose.model('Order', orderSchema);
+const Order = mongoose.model("Order", orderSchema);
 
 module.exports = Order;

@@ -12,17 +12,20 @@ class GoogleSheetsService {
 
   /**
    * Initialize the Google Spreadsheet connection
+   * @param {string} sheetId - Optional specific sheet ID to load
    */
-  async init() {
+  async init(sheetId = null) {
     try {
-      if (this.initialized) return;
+      const spreadsheetId = sheetId || process.env.GOOGLE_SHEET_ID;
+
+      // If already initialized with this sheet, skip
+      if (this.initialized && this.doc?.spreadsheetId === spreadsheetId) return;
 
       const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
       const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-      const spreadsheetId = process.env.GOOGLE_SHEET_ID;
 
       if (!serviceAccountEmail || !privateKey || !spreadsheetId) {
-        console.warn("⚠️ Google Sheets credentials missing in .env");
+        console.warn("⚠️ Google Sheets credentials missing");
         return;
       }
 
@@ -45,10 +48,11 @@ class GoogleSheetsService {
   /**
    * Append a new order row to the spreadsheet
    * @param {Object} order - The order document
+   * @param {string} sheetId - Store-specific sheet ID
    */
-  async appendOrder(order) {
+  async appendOrder(order, sheetId = null) {
     try {
-      await this.init();
+      await this.init(sheetId);
       if (!this.initialized) return;
 
       const sheet = this.doc.sheetsByIndex[0]; // Assumes first sheet
@@ -59,7 +63,7 @@ class GoogleSheetsService {
 
       // Create row data - simplified keys to match exactly
       const rowData = {
-        Огноо: new Date(order.createdAt).toLocaleString("mn-MN"),
+        Огноо: order.createdAt,
         "Захиалгын ID": order._id.toString(),
         Үйлчлүүлэгч: order.customer?.name || "Unknown",
         Утас: order.phoneNumber || "",

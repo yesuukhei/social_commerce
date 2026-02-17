@@ -1,15 +1,20 @@
-const axios = require('axios');
+const axios = require("axios");
 
 const PAGE_ACCESS_TOKEN = process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
-const GRAPH_API_VERSION = 'v18.0';
+const GRAPH_API_VERSION = "v18.0";
 const GRAPH_API_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
 /**
  * Send a text message to a user
  * @param {string} recipientId - Facebook Page-Scoped ID
  * @param {object} message - Message object with text or attachment
+ * @param {string} pageToken - Optional page access token
  */
-exports.sendMessage = async (recipientId, message) => {
+exports.sendMessage = async (
+  recipientId,
+  message,
+  pageToken = PAGE_ACCESS_TOKEN,
+) => {
   try {
     const requestBody = {
       recipient: {
@@ -22,14 +27,17 @@ exports.sendMessage = async (recipientId, message) => {
       `${GRAPH_API_URL}/me/messages`,
       requestBody,
       {
-        params: { access_token: PAGE_ACCESS_TOKEN },
-      }
+        params: { access_token: pageToken },
+      },
     );
 
-    console.log('✅ Message sent successfully:', response.data);
+    console.log("✅ Message sent successfully:", response.data);
     return response.data;
   } catch (error) {
-    console.error('❌ Error sending message:', error.response?.data || error.message);
+    console.error(
+      "❌ Error sending message:",
+      error.response?.data || error.message,
+    );
     throw error;
   }
 };
@@ -38,10 +46,15 @@ exports.sendMessage = async (recipientId, message) => {
  * Send typing indicator (on/off)
  * @param {string} recipientId - Facebook Page-Scoped ID
  * @param {boolean} isTyping - true to show typing, false to hide
+ * @param {string} pageToken - Optional page access token
  */
-exports.sendTypingIndicator = async (recipientId, isTyping = true) => {
+exports.sendTypingIndicator = async (
+  recipientId,
+  isTyping = true,
+  pageToken = PAGE_ACCESS_TOKEN,
+) => {
   try {
-    const senderAction = isTyping ? 'typing_on' : 'typing_off';
+    const senderAction = isTyping ? "typing_on" : "typing_off";
 
     const requestBody = {
       recipient: {
@@ -51,49 +64,57 @@ exports.sendTypingIndicator = async (recipientId, isTyping = true) => {
     };
 
     await axios.post(`${GRAPH_API_URL}/me/messages`, requestBody, {
-      params: { access_token: PAGE_ACCESS_TOKEN },
+      params: { access_token: pageToken },
     });
 
-    console.log(`⌨️  Typing indicator ${isTyping ? 'ON' : 'OFF'}`);
+    console.log(`⌨️  Typing indicator ${isTyping ? "ON" : "OFF"}`);
   } catch (error) {
-    console.error('❌ Error sending typing indicator:', error.response?.data || error.message);
+    console.error(
+      "❌ Error sending typing indicator:",
+      error.response?.data || error.message,
+    );
   }
 };
 
 /**
  * Mark message as read
  * @param {string} recipientId - Facebook Page-Scoped ID
+ * @param {string} pageToken - Optional page access token
  */
-exports.markAsRead = async (recipientId) => {
+exports.markAsRead = async (recipientId, pageToken = PAGE_ACCESS_TOKEN) => {
   try {
     const requestBody = {
       recipient: {
         id: recipientId,
       },
-      sender_action: 'mark_seen',
+      sender_action: "mark_seen",
     };
 
     await axios.post(`${GRAPH_API_URL}/me/messages`, requestBody, {
-      params: { access_token: PAGE_ACCESS_TOKEN },
+      params: { access_token: pageToken },
     });
 
-    console.log('✅ Message marked as read');
+    console.log("✅ Message marked as read");
   } catch (error) {
-    console.error('❌ Error marking message as read:', error.response?.data || error.message);
+    console.error(
+      "❌ Error marking message as read:",
+      error.response?.data || error.message,
+    );
   }
 };
 
 /**
  * Get user information from Facebook
  * @param {string} userId - Facebook Page-Scoped ID
+ * @param {string} pageToken - Optional page access token
  * @returns {object} User profile data
  */
-exports.getUserInfo = async (userId) => {
+exports.getUserInfo = async (userId, pageToken = PAGE_ACCESS_TOKEN) => {
   try {
     const response = await axios.get(`${GRAPH_API_URL}/${userId}`, {
       params: {
-        fields: 'first_name,last_name,profile_pic',
-        access_token: PAGE_ACCESS_TOKEN,
+        fields: "first_name,last_name,profile_pic",
+        access_token: pageToken,
       },
     });
 
@@ -105,11 +126,14 @@ exports.getUserInfo = async (userId) => {
       profilePic: userData.profile_pic,
     };
   } catch (error) {
-    console.error('❌ Error getting user info:', error.response?.data || error.message);
+    console.error(
+      "❌ Error getting user info:",
+      error.response?.data || error.message,
+    );
     return {
-      name: 'Unknown User',
-      firstName: 'Unknown',
-      lastName: 'User',
+      name: "Unknown User",
+      firstName: "Unknown",
+      lastName: "User",
     };
   }
 };
@@ -119,21 +143,27 @@ exports.getUserInfo = async (userId) => {
  * @param {string} recipientId - Facebook Page-Scoped ID
  * @param {string} text - Message text
  * @param {array} quickReplies - Array of quick reply objects
+ * @param {string} pageToken - Optional page access token
  */
-exports.sendQuickReply = async (recipientId, text, quickReplies) => {
+exports.sendQuickReply = async (
+  recipientId,
+  text,
+  quickReplies,
+  pageToken = PAGE_ACCESS_TOKEN,
+) => {
   try {
     const message = {
       text: text,
       quick_replies: quickReplies.map((reply) => ({
-        content_type: 'text',
+        content_type: "text",
         title: reply.title,
         payload: reply.payload,
       })),
     };
 
-    return await this.sendMessage(recipientId, message);
+    return await this.sendMessage(recipientId, message, pageToken);
   } catch (error) {
-    console.error('❌ Error sending quick reply:', error);
+    console.error("❌ Error sending quick reply:", error);
     throw error;
   }
 };
@@ -143,17 +173,23 @@ exports.sendQuickReply = async (recipientId, text, quickReplies) => {
  * @param {string} recipientId - Facebook Page-Scoped ID
  * @param {string} text - Message text
  * @param {array} buttons - Array of button objects
+ * @param {string} pageToken - Optional page access token
  */
-exports.sendButtonTemplate = async (recipientId, text, buttons) => {
+exports.sendButtonTemplate = async (
+  recipientId,
+  text,
+  buttons,
+  pageToken = PAGE_ACCESS_TOKEN,
+) => {
   try {
     const message = {
       attachment: {
-        type: 'template',
+        type: "template",
         payload: {
-          template_type: 'button',
+          template_type: "button",
           text: text,
           buttons: buttons.map((button) => ({
-            type: button.type || 'postback',
+            type: button.type || "postback",
             title: button.title,
             payload: button.payload,
             url: button.url,
@@ -162,9 +198,9 @@ exports.sendButtonTemplate = async (recipientId, text, buttons) => {
       },
     };
 
-    return await this.sendMessage(recipientId, message);
+    return await this.sendMessage(recipientId, message, pageToken);
   } catch (error) {
-    console.error('❌ Error sending button template:', error);
+    console.error("❌ Error sending button template:", error);
     throw error;
   }
 };
@@ -173,22 +209,27 @@ exports.sendButtonTemplate = async (recipientId, text, buttons) => {
  * Send a generic template (carousel)
  * @param {string} recipientId - Facebook Page-Scoped ID
  * @param {array} elements - Array of card elements
+ * @param {string} pageToken - Optional page access token
  */
-exports.sendGenericTemplate = async (recipientId, elements) => {
+exports.sendGenericTemplate = async (
+  recipientId,
+  elements,
+  pageToken = PAGE_ACCESS_TOKEN,
+) => {
   try {
     const message = {
       attachment: {
-        type: 'template',
+        type: "template",
         payload: {
-          template_type: 'generic',
+          template_type: "generic",
           elements: elements,
         },
       },
     };
 
-    return await this.sendMessage(recipientId, message);
+    return await this.sendMessage(recipientId, message, pageToken);
   } catch (error) {
-    console.error('❌ Error sending generic template:', error);
+    console.error("❌ Error sending generic template:", error);
     throw error;
   }
 };
@@ -197,12 +238,17 @@ exports.sendGenericTemplate = async (recipientId, elements) => {
  * Send an image
  * @param {string} recipientId - Facebook Page-Scoped ID
  * @param {string} imageUrl - URL of the image
+ * @param {string} pageToken - Optional page access token
  */
-exports.sendImage = async (recipientId, imageUrl) => {
+exports.sendImage = async (
+  recipientId,
+  imageUrl,
+  pageToken = PAGE_ACCESS_TOKEN,
+) => {
   try {
     const message = {
       attachment: {
-        type: 'image',
+        type: "image",
         payload: {
           url: imageUrl,
           is_reusable: true,
@@ -210,9 +256,9 @@ exports.sendImage = async (recipientId, imageUrl) => {
       },
     };
 
-    return await this.sendMessage(recipientId, message);
+    return await this.sendMessage(recipientId, message, pageToken);
   } catch (error) {
-    console.error('❌ Error sending image:', error);
+    console.error("❌ Error sending image:", error);
     throw error;
   }
 };

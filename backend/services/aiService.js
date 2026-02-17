@@ -9,22 +9,36 @@ const openai = new OpenAI({
  * Detects intent, extracts order info, and generates response context in one call
  * @param {string} messageText - Customer's message
  * @param {Array} history - Brief conversation history for context
+ * @param {Array} catalog - Available products for this store
  * @returns {object} Extracted data and response logic
  */
-exports.processMessage = async (messageText, history = []) => {
+exports.processMessage = async (messageText, history = [], catalog = []) => {
   try {
     const formattedHistory = history
       .map((h) => `${h.sender === "customer" ? "User" : "Bot"}: ${h.text}`)
       .join("\n");
 
+    const catalogContext =
+      catalog.length > 0
+        ? `ДЭЛГҮҮРИЙН БАРААНЫ ЖАГСААЛТ:\n${catalog.map((p) => `- ${p.name}: ₮${p.price} (Үлдэгдэл: ${p.stock})`).join("\n")}`
+        : "Барааны жагсаалт одоогоор байхгүй байна.";
+
     const systemPrompt = `Чи бол Монголын онлайн дэлгүүрийн ухаалаг туслах бот.
-ҮҮРЭГ: Хэрэглэгчийн мессежнээс зорилго (intent) болон захиалгын мэдээллийг задлан шинжлэх.
+ҮҮРЭГ: Хэрэглэгчийн мессежнээс захиалгын мэдээллийг задлан шинжлэх.
+
+${catalogContext}
 
 ДҮРЭМ:
-1. Латин галигаар бичсэн бол (жишээ нь: "tsamts avya") кирилл рүү хөрвүүлж ойлго.
-2. Товчлолыг (БЗД, ХУД, СХД, 1-р хороо) бүтэн нэршил рүү хөрвүүл (Баянзүрх дүүрэг гэх мэт).
-3. Хэрэв хэрэглэгч олон төрлийн бараа бичсэн бол 'items' хүснэгтэд салгаж бич.
-4. 'confidence' оноог 0.0-1.0 хооронд өг.
+1. Латин галигаар бичсэн бол кирилл рүү хөрвүүлж ойлго.
+2. Хэрэглэгчийн хүссэн бараа "ДЭЛГҮҮРИЙН БАРААНЫ ЖАГСААЛТ"-ад байгаа эсэхийг шалга.
+3. Хэрэв байгаа бол тухайн барааны яг ОНОВЧТОЙ НЭР болон ҮНЭ-ийг 'items' дотор бич.
+4. Хэрэв бараа байхгүй бол 'intent' : 'inquiry' болгоод, байхгүй байгааг эелдэгээр тайлбарла.
+5. Дүүрэг, Хороо, товчлолыг бүтэн нэршил рүү хөрвүүл.
+
+ШИЙДВЭР ГАРГАЛТ (isOrderReady):
+- Хэрэв (1.Бараа + 2.Утас + 3.Хаяг) энэ 3 мэдээлэл байвал 'isOrderReady' : true болго.
+- Хаяг дээр зөвхөн Дүүрэг болон Хороо байхад л Хангалттай (Ready: true) гэж үзнэ. Байр, орц, давхар заавал байх албагүй.
+- Хэрэв бараа нь жагсаалтад байхгүй БОЛ 'isOrderReady' : false байна.
 
 JSON БҮТЭЦ:
 {
@@ -32,20 +46,18 @@ JSON БҮТЭЦ:
   "isOrderReady": true/false,
   "confidence": number,
   "data": {
-    "items": [{ "name": string, "quantity": number, "size": string, "color": string }],
+    "items": [{ 
+       "name": string, 
+       "quantity": number, 
+       "price": number,
+       "attributes": { "color": string, "size": string, ... } 
+    }],
     "phone": string,
-    "address": {
-       "district": string,
-       "khoroo": string,
-       "detail": string
-    },
     "full_address": string,
-    "payment_method": "qpay | cash | transfer | null"
+    "payment_method": string
   },
-  "missingFields": ["phone", "address", "items"]
-}
-
-Хэрэв өмнөх ярианы контекст (History) байгаа бол түүнийг ашиглан "тэрийг авъя", "тийн" гэх мэт үгсийг юуг зааж байгааг тодорхойл.`;
+  "missingFields": ["phone", "full_address", "items"]
+}`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",

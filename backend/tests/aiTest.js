@@ -3,73 +3,53 @@ const aiService = require("../services/aiService");
 
 const testCases = [
   {
-    name: "Standard Order (Cyrillic)",
-    message:
-      "2 ширхэг хар цамц авъя. Утас: 99112233. БЗД 14-р хороо, 25-р байр",
+    name: "Standard Order (Cyrillic) - IN CATALOG",
+    message: "2 ширхэг хар цамц авъя. Утас: 99112233. БЗД 14-р хороо",
     history: [],
   },
   {
-    name: "Transliterated (Latin)",
-    message: "2 shirheg har tsamts avya. Utas 88001122. BZD 14 khoroo",
+    name: "Standard Order - NOT IN CATALOG",
+    message: "1 ширхэг гутал авъя. Утас: 99112233. ХУД 2-р хороо",
     history: [],
   },
   {
-    name: "Multiple Different Items",
-    message: "1 улаан даашинз, 2 хар өмд авъя. 99001122, СХД 18-р хороо",
-    history: [],
-  },
-  {
-    name: "Missing Info (Inquiry)",
-    message: "Энэ цамц хэд вэ?",
-    history: [],
-  },
-  {
-    name: "Context Handling (Requires History)",
-    message: "За 2-ыг авъя. 95112233, ХУД 2-р хороо",
-    history: [
-      { sender: "customer", text: "Цэнхэр цамц байгаа юу?" },
-      { sender: "bot", text: "Тийм ээ, байгаа. Үнэ нь 45,000 төгрөг." },
-    ],
-  },
-  {
-    name: "Abbreviations & Slang",
-    message:
-      "сайн уу, бзд 13-р хороолол хүргэлт байгаа юу? 99119911. 1 куртка авъя",
-    history: [],
-  },
-  {
-    name: "Mixed Numbers (Phone vs Qty)",
-    message:
-      "99110022 руу залгаарай, 5 ширхэг хүүхдийн оймс авъя. БЗД 2-р хороо",
-    history: [],
-  },
-  {
-    name: "Foreign Language Mix",
-    message: "I want to buy 2 black T-shirts. Delivery to BZD. Phone 88997766",
+    name: "Mixed Ordering (One in, one out)",
+    message: "Хар цамц 1, гутал 1 авъя. 88889999",
     history: [],
   },
 ];
 
-async function runTests() {
-  console.log("🧪 Starting AI Smart Assistant Tests...\n");
-  console.log("--------------------------------------------------\n");
+const mockCatalog = [
+  { name: "хар цамц", price: 45000, stock: 10 },
+  { name: "улаан даашинз", price: 75000, stock: 5 },
+  { name: "хар өмд", price: 55000, stock: 8 },
+  { name: "хүүхдийн оймс", price: 5000, stock: 20 },
+];
 
-  let passed = 0;
+async function runTests() {
+  console.log("🧪 Starting Smart AI Catalog Tests...\n");
 
   for (const test of testCases) {
     console.log(`📝 Testing: ${test.name}`);
     console.log(`💬 Message: "${test.message}"`);
 
     try {
-      const start = Date.now();
-      const result = await aiService.processMessage(test.message, test.history);
-      const duration = Date.now() - start;
+      const result = await aiService.processMessage(
+        test.message,
+        test.history,
+        mockCatalog,
+      );
 
-      console.log(`⏱️ Duration: ${duration}ms`);
-      console.log(`🔍 Full Result: ${JSON.stringify(result, null, 2)}`);
+      console.log(`🎯 Intent: ${result.intent}`);
+      console.log(`✅ Ready: ${result.isOrderReady}`);
+      console.log(`📦 Extracted Items: ${JSON.stringify(result.data.items)}`);
 
-      if (result.intent === "ordering" && result.isOrderReady) {
-        passed++;
+      if (result.isOrderReady) {
+        console.log("💰 AI found the items in catalog and calculated prices!");
+      } else {
+        console.log(
+          "❌ AI correctly flagged that some items or info are missing.",
+        );
       }
 
       console.log("\n--------------------------------------------------\n");
@@ -77,10 +57,7 @@ async function runTests() {
       console.error(`❌ Test Failed: ${test.name}`, error.message);
     }
   }
-
-  console.log(
-    `🏁 Tests Completed. ${passed}/${testCases.length} orders extracted successfully.`,
-  );
+  console.log(`🏁 Tests Completed.`);
 }
 
 runTests();

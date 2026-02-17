@@ -35,6 +35,8 @@ exports.verifyWebhook = (req, res) => {
   }
 };
 
+const { Store, Product, Customer, Conversation, Order } = require("../models");
+
 /**
  * Handle Incoming Messages (POST request from Facebook)
  * This is called when a customer sends a message
@@ -42,28 +44,60 @@ exports.verifyWebhook = (req, res) => {
 exports.handleWebhook = async (req, res) => {
   const body = req.body;
 
-  // Check if this is an event from a page subscription
   if (body.object === "page") {
-    // Return 200 OK immediately to Facebook
     res.status(200).send("EVENT_RECEIVED");
 
-    // Process each entry (can be multiple if batched)
     try {
       await Promise.all(
         body.entry.map(async (entry) => {
-          // Get the webhook event
+          const pageId = entry.id; // Correct way to get Page ID in webhook entries
           const webhookEvent = entry.messaging[0];
-
-          // Get the sender PSID (Page-Scoped ID)
           const senderPsid = webhookEvent.sender.id;
 
-          console.log(`📨 Received message from sender: ${senderPsid}`);
+          console.log(
+            `📨 Message for Page: ${pageId} from Sender: ${senderPsid}`,
+          );
 
-          // Check if the event is a message or postback
+          // 1. Find Store
+          let store = await Store.findOne({ facebookPageId: pageId });
+
+          // Seed a default store if none exists and we have env vars (Migration helper)
+          if (!store && pageId === process.env.FACEBOOK_PAGE_ID) {
+            store = new Store({
+              name: "Default Shop",
+              facebookPageId: process.env.FACEBOOK_PAGE_ID,
+              facebookPageToken: process.env.FACEBOOK_PAGE_ACCESS_TOKEN,
+              googleSheetId: process.env.GOOGLE_SHEET_ID,
+            });
+            await store.save();
+          }
+
+          if (!store) {
+            console.error(`❌ Store not found for Page ID: ${pageId}`);
+            return;
+          }
+
+          // 2. Load Catalog (Products)
+          const catalog = await Product.find({
+            store: store._id,
+            isActive: true,
+          });
+
+          // 3. Process Event
           if (webhookEvent.message) {
-            await handleMessage(senderPsid, webhookEvent.message);
+            await handleMessage(
+              senderPsid,
+              webhookEvent.message,
+              store,
+              catalog,
+            );
           } else if (webhookEvent.postback) {
-            await handlePostback(senderPsid, webhookEvent.postback);
+            await handlePostback(
+              senderPsid,
+              webhookEvent.postback,
+              store,
+              catalog,
+            );
           }
         }),
       );
@@ -71,7 +105,6 @@ exports.handleWebhook = async (req, res) => {
       console.error("❌ Error processing entries:", error);
     }
   } else {
-    // Return 404 Not Found if event is not from a page subscription
     res.sendStatus(404);
   }
 };
@@ -79,21 +112,21 @@ exports.handleWebhook = async (req, res) => {
 /**
  * Handle incoming text messages
  */
-async function handleMessage(senderPsid, receivedMessage) {
+async function handleMessage(senderPsid, receivedMessage, store, catalog) {
   try {
     let response;
 
-    // Check if the message contains text
     if (receivedMessage.text) {
       const messageText = receivedMessage.text;
-      console.log(`💬 Message text: ${messageText}`);
+      console.log(`💬 Message [${store.name}]: ${messageText}`);
 
       // Find or create customer
-      const customer = await findOrCreateCustomer(senderPsid);
+      const customer = await findOrCreateCustomer(senderPsid, store);
 
       // Find or create conversation
       let conversation = await Conversation.findOne({
         facebookConversationId: senderPsid,
+        customer: customer._id,
       });
 
       if (!conversation) {
@@ -104,29 +137,31 @@ async function handleMessage(senderPsid, receivedMessage) {
         });
       }
 
-      // Get brief history (last 5 messages) for AI context
       const history = conversation.messages.slice(-5);
-
-      // Add customer message to conversation
       await conversation.addMessage("customer", messageText);
 
-      // Send typing indicator
-      await messengerService.sendTypingIndicator(senderPsid, true);
+      await messengerService.sendTypingIndicator(
+        senderPsid,
+        true,
+        store.facebookPageToken,
+      );
 
-      // Process message with Unified AI
-      const aiResult = await aiService.processMessage(messageText, history);
+      // Process message with Unified AI and Store Catalog
+      const aiResult = await aiService.processMessage(
+        messageText,
+        history,
+        catalog,
+      );
 
-      // Update conversation intent
       conversation.currentIntent = aiResult.intent || "browsing";
 
-      // Check if AI detected an order readiness
       if (
         aiResult.intent === "ordering" &&
         aiResult.isOrderReady &&
         aiResult.confidence > 0.6
       ) {
-        // Prepare order data with MULTIPLE items
         const orderData = {
+          store: store._id, // Linked to current store
           customer: customer._id,
           conversation: conversation._id,
           phoneNumber: aiResult.data.phone || "99999999",
@@ -134,7 +169,8 @@ async function handleMessage(senderPsid, receivedMessage) {
           items: aiResult.data.items.map((item) => ({
             itemName: item.name || "Бараа",
             quantity: item.quantity || 1,
-            price: 0, // Default
+            price: item.price || 0,
+            attributes: item.attributes || {},
           })),
           totalAmount: 0,
           aiExtraction: {
@@ -146,33 +182,26 @@ async function handleMessage(senderPsid, receivedMessage) {
           status: "pending",
         };
 
-        // Create and save Order
         const order = new Order(orderData);
         await order.save();
-        console.log(`✅ Order created in DB: ${order._id}`);
+        console.log(`✅ Order created for ${store.name}: ${order._id}`);
 
-        // Sync to Google Sheets (Async)
         const populatedOrder = await Order.findById(order._id).populate(
           "customer",
         );
         googleSheetsService
-          .appendOrder(populatedOrder)
+          .appendOrder(populatedOrder, store.googleSheetId) // Pass shop-specific sheet ID
           .catch((err) =>
             console.error("❌ Google Sheets sync failed:", err.message),
           );
 
-        // Generate Confirmation Response
         const replyText = await aiService.generateResponse(
           aiResult,
           messageText,
         );
         response = { text: replyText };
-
-        // Update conversation status
         conversation.status = "order_created";
-        conversation.aiContext = aiResult;
       } else {
-        // Handle inquiry, browsing, or missing info
         const replyText = await aiService.generateResponse(
           aiResult,
           messageText,
@@ -185,95 +214,87 @@ async function handleMessage(senderPsid, receivedMessage) {
       }
 
       await conversation.save();
-
-      // Add bot response to conversation
       await conversation.addMessage("bot", response.text);
-
-      // Turn off typing indicator
-      await messengerService.sendTypingIndicator(senderPsid, false);
-
-      // Send the response message
-      await messengerService.sendMessage(senderPsid, response);
+      await messengerService.sendTypingIndicator(
+        senderPsid,
+        false,
+        store.facebookPageToken,
+      );
+      await messengerService.sendMessage(
+        senderPsid,
+        response,
+        store.facebookPageToken,
+      );
     } else if (receivedMessage.attachments) {
-      // Handle attachments (images, etc.)
       response = {
         text: "📷 Зураг хүлээн авлаа! Захиалгын мэдээллээ текстээр илгээнэ үү.",
       };
-      await messengerService.sendMessage(senderPsid, response);
+      await messengerService.sendMessage(
+        senderPsid,
+        response,
+        store.facebookPageToken,
+      );
     }
   } catch (error) {
     console.error("❌ Error handling message:", error);
-
-    // Send error message to user - wrapped in try-catch to prevent crash on invalid PSID
     try {
-      await messengerService.sendMessage(senderPsid, {
-        text: "😔 Уучлаарай, алдаа гарлаа. Дахин оролдоно уу.",
-      });
-    } catch (sendError) {
-      console.error(
-        "❌ Failed to send error message to user:",
-        sendError.message,
+      await messengerService.sendMessage(
+        senderPsid,
+        {
+          text: "😔 Уучлаарай, алдаа гарлаа. Дахин оролдоно уу.",
+        },
+        store.facebookPageToken,
       );
-    }
+    } catch (sendError) {}
   }
 }
 
 /**
- * Handle postback events (button clicks)
+ * Handle postback events
  */
-async function handlePostback(senderPsid, receivedPostback) {
+async function handlePostback(senderPsid, receivedPostback, store, catalog) {
   try {
     const payload = receivedPostback.payload;
-    console.log(`🔘 Postback received: ${payload}`);
-
     let response;
 
-    // Handle different postback payloads
     switch (payload) {
       case "GET_STARTED":
         response = {
-          text: "👋 Тавтай морил! Би таны захиалгыг хүлээн авах туслах бот юм. Захиалга өгөхийг хүсвэл мэдээллээ илгээнэ үү!",
-        };
-        break;
-      case "VIEW_CATALOG":
-        response = {
-          text: "📦 Манай бүтээгдэхүүнүүдийг үзэхийг хүсвэл холбоо барина уу!",
+          text: `👋 Тавтай морил! Би ${store.name}-ийн туслах бот байна.`,
         };
         break;
       default:
-        response = {
-          text: "Тодорхойгүй команд байна.",
-        };
+        response = { text: "Тодорхойгүй команд байна." };
     }
 
-    await messengerService.sendMessage(senderPsid, response);
+    await messengerService.sendMessage(
+      senderPsid,
+      response,
+      store.facebookPageToken,
+    );
   } catch (error) {
     console.error("❌ Error handling postback:", error);
   }
 }
 
 /**
- * Find or create customer in database
+ * Find or create customer
  */
-async function findOrCreateCustomer(facebookId) {
+async function findOrCreateCustomer(facebookId, store) {
   try {
     let customer = await Customer.findOne({ facebookId });
 
     if (!customer) {
-      // Get user info from Facebook
-      const userInfo = await messengerService.getUserInfo(facebookId);
-
+      const userInfo = await messengerService.getUserInfo(
+        facebookId,
+        store.facebookPageToken,
+      );
       customer = new Customer({
         facebookId,
         name: userInfo.name || "Unknown User",
       });
-
       await customer.save();
-      console.log(`✅ New customer created: ${customer.name}`);
-    } else {
-      console.log(`👤 Existing customer found: ${customer.name}`);
     }
-
     return customer;
   } catch (error) {
     console.error("❌ Error finding/creating customer:", error);
