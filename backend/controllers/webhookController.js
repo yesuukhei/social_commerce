@@ -1,6 +1,3 @@
-const Customer = require("../models/Customer");
-const Conversation = require("../models/Conversation");
-const Order = require("../models/Order");
 const messengerService = require("../services/messengerService");
 const aiService = require("../services/aiService");
 const googleSheetsService = require("../services/googleSheetsService");
