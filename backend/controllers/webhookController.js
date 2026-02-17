@@ -180,21 +180,23 @@ async function handleMessage(senderPsid, receivedMessage, store, catalog) {
         };
 
         const order = new Order(orderData);
-        await order.save();
+        await order.save(); // This triggers the pre-save total calculation
         console.log(`✅ Order created for ${store.name}: ${order._id}`);
 
         const populatedOrder = await Order.findById(order._id).populate(
           "customer",
         );
         googleSheetsService
-          .appendOrder(populatedOrder, store.googleSheetId) // Pass shop-specific sheet ID
+          .appendOrder(populatedOrder, store.googleSheetId)
           .catch((err) =>
             console.error("❌ Google Sheets sync failed:", err.message),
           );
 
+        // Pass the saved 'order' to generate a detailed confirmation
         const replyText = await aiService.generateResponse(
           aiResult,
           messageText,
+          order,
         );
         response = { text: replyText };
         conversation.status = "order_created";

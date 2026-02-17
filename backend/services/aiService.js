@@ -21,37 +21,35 @@ exports.processMessage = async (messageText, history = [], catalog = []) => {
     const catalogContext =
       catalog.length > 0
         ? `ДЭЛГҮҮРИЙН БАРААНЫ ЖАГСААЛТ:\n${catalog.map((p) => `- ${p.name}: ₮${p.price} (Үлдэгдэл: ${p.stock})`).join("\n")}`
-        : "Барааны жагсаалт одоогоор байхгүй байна.";
+        : "АНХААР: Одоогоор дэлгүүрт бэлэн бараа байхгүй байна. Хэрэглэгчид удахгүй шинэ бараа ирнэ гэж эелдэгээр хэлээрэй.";
 
     const systemPrompt = `Чи бол Монголын онлайн дэлгүүрийн ухаалаг туслах бот.
-ҮҮРЭГ: Хэрэглэгчийн мессежнээс захиалгын мэдээллийг задлан шинжлэх.
+ҮҮРЭГ: Хэрэглэгчийн мессежнээс зорилго болон захиалгын мэдээллийг задлан шинжлэх.
 
 ${catalogContext}
 
+ЗОРИЛГО ТОДОРХОЙЛОХ (Intent):
+1. 'browsing' -> Хэрэглэгч "сайн уу", "юу байна", "юу зардаг вэ", "санал болго" гэх мэтээр зөвхөн сонирхож байвал.
+2. 'inquiry' -> Тодорхой бараа асуусан боловч (байгаа юу, үнэ хэд вэ) авах эсэх нь тодорхойгүй байвал.
+3. 'ordering' -> "Авъя", "Захиалъя", "Нэгийг бичээрэй" гэх мэтээр худалдан авах шийдвэр гаргасан эсвэл хаяг, утсаа бичсэн бол.
+
 ДҮРЭМ:
 1. Латин галигаар бичсэн бол кирилл рүү хөрвүүлж ойлго.
-2. Хэрэглэгчийн хүссэн бараа "ДЭЛГҮҮРИЙН БАРААНЫ ЖАГСААЛТ"-ад байгаа эсэхийг шалга.
-3. Хэрэв байгаа бол тухайн барааны яг ОНОВЧТОЙ НЭР болон ҮНЭ-ийг 'items' дотор бич.
-4. Хэрэв бараа байхгүй бол 'intent' : 'inquiry' болгоод, байхгүй байгааг эелдэгээр тайлбарла.
-5. Дүүрэг, Хороо, товчлолыг бүтэн нэршил рүү хөрвүүл.
+2. Хэрэглэгчийн хүссэн бараа жагсаалтад байхгүй бол манайд байгаа өөр ижил төстэй барааг 'data.alternative_items' дотор санал болгож бич.
+3. Дүүрэг, Хороог бүтэн нэршил рүү хөрвүүл.
 
 ШИЙДВЭР ГАРГАЛТ (isOrderReady):
-- Хэрэв (1.Бараа + 2.Утас + 3.Хаяг) энэ 3 мэдээлэл байвал 'isOrderReady' : true болго.
-- Хаяг дээр зөвхөн Дүүрэг болон Хороо байхад л Хангалттай (Ready: true) гэж үзнэ. Байр, орц, давхар заавал байх албагүй.
-- Хэрэв бараа нь жагсаалтад байхгүй БОЛ 'isOrderReady' : false байна.
+- Зөвхөн 'intent' : 'ordering' үед (Бараа + Утас + Хаяг) бүрэн байвал 'isOrderReady' : true болно.
+- Бусад тохиолдолд (browsing, inquiry) үргэлж 'isOrderReady' : false байна.
 
 JSON БҮТЭЦ:
 {
-  "intent": "ordering | inquiry | complaint | browsing",
+  "intent": "browsing | inquiry | ordering",
   "isOrderReady": true/false,
   "confidence": number,
   "data": {
-    "items": [{ 
-       "name": string, 
-       "quantity": number, 
-       "price": number,
-       "attributes": { "color": string, "size": string, ... } 
-    }],
+    "items": [{ "name": string, "quantity": number, "price": number, "attributes": object }],
+    "alternative_items": [string], (Манай каталог-д байгаа бараануудаас)
     "phone": string,
     "full_address": string,
     "payment_method": string
@@ -100,20 +98,29 @@ JSON БҮТЭЦ:
  * Generate a friendly response in Mongolian
  * @param {object} aiResult - Result from processMessage
  * @param {string} userMessage - User's original message
+ * @param {object} order - Optional created order object for confirmation
  * @returns {string} Generated response
  */
-exports.generateResponse = async (aiResult, userMessage) => {
+exports.generateResponse = async (aiResult, userMessage, order = null) => {
   try {
+    const orderContext = order
+      ? `ЗАХИАЛГА БАТАЛГААЖЛАА:
+         Дүн: ₮${order.totalAmount}
+         Бараанууд: ${order.items.map((i) => `${i.itemName} x ${i.quantity}`).join(", ")}
+         Утас: ${order.phoneNumber}
+         Хаяг: ${order.address}`
+      : "";
+
     const systemPrompt = `Чи бол Монголын онлайн дэлгүүрийн найрсаг туслах бот.
 AI-ийн задалсан үр дүнд (AI Result) тулгуурлан хэрэглэгчид товч бөгөөд найрсаг хариулт өг.
 
-АНХААРАХ ДҮРЭМ:
-1. Хэрэв 'intent' нь 'inquiry' (асуулт) байвал: Бараа байхгүй байгааг эелдэгээр хэлж, өөр бараа санал болго. Заавал утас, хаяг асуух ГЭЖ БИТГИ ЯАРААРАЙ.
-2. Хэрэв 'isOrderReady' : true бол: Захиалгыг нь баталгаажуулж, 'Data' доторх мэдээллүүдийг жагсааж харуул.
-3. Хэрэв 'intent' : 'ordering' мөртлөө 'isOrderReady' : false бол: Яг аль мэдээлэл (утас, хаяг, эсвэл бараа) дутуу байгааг эелдэгээр асуу.
-4. Хэрэв хэрэглэгчийн хүссэн бараа манай жагсаалтад байхгүй (байхгүй байгааг AI Result хэлнэ) бол: "Уучлаарай, одоогоор [Барааны нэр] байхгүй байна" гэж тодорхой хариул.
+${orderContext}
 
-Монгол хэлээр, emoji ашиглан найрсаг хариул.`;
+АНХААРАХ ДҮРЭМ:
+1. Хэрэв ЗАХИАЛГА БАТАЛГААЖЛАА гэсэн контекст байвал: Баярлалаа гээд дээрх мэдээллийг жагсааж баталгаажуул. Нийт дүнг заавал хэл.
+2. Хэрэв 'intent' : 'browsing' бол: Юу ч битгий нэхээрэй. Зөвхөн мэндлээд, манайд ямар бараанууд байгааг танилцуул.
+3. Хэрэв хэрэглэгч "санал болго" гэвэл: "ДЭЛГҮҮРИЙН БАРААНЫ ЖАГСААЛТ"-аас 2-3 барааг онцлон санал болгож, үнийг нь хэл.
+...`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
