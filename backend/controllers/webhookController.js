@@ -3,6 +3,7 @@ const Conversation = require("../models/Conversation");
 const Order = require("../models/Order");
 const messengerService = require("../services/messengerService");
 const aiService = require("../services/aiService");
+const googleSheetsService = require("../services/googleSheetsService");
 
 /**
  * Webhook Verification (GET request from Facebook)
@@ -149,6 +150,16 @@ async function handleMessage(senderPsid, receivedMessage) {
         const order = new Order(orderData);
         await order.save();
         console.log(`✅ Order created in DB: ${order._id}`);
+
+        // Sync to Google Sheets (Async)
+        const populatedOrder = await Order.findById(order._id).populate(
+          "customer",
+        );
+        googleSheetsService
+          .appendOrder(populatedOrder)
+          .catch((err) =>
+            console.error("❌ Google Sheets sync failed:", err.message),
+          );
 
         response = {
           text: `✅ Баярлалаа! Таны захиалгыг хүлээн авлаа.\n\n📦 Бараа: ${aiResult.data.item_name || "Тодорхойгүй"}\n📞 Утас: ${aiResult.data.phone_number || "Тодорхойгүй"}\n📍 Хаяг: ${aiResult.data.address || "Тодорхойгүй"}\n\nМанай ажилтан удахгүй холбогдох болно! 🙏`,
