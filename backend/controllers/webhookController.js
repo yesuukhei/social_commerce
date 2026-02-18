@@ -183,6 +183,32 @@ async function handleMessage(senderPsid, receivedMessage, store, catalog) {
         await order.save(); // This triggers the pre-save total calculation
         console.log(`✅ Order created for ${store.name}: ${order._id}`);
 
+        // Inventory Update (Two-Way Sync)
+        for (const item of order.items) {
+          const product = await Product.findOne({
+            store: store._id,
+            name: item.itemName,
+          });
+          if (product) {
+            product.stock = Math.max(0, product.stock - item.quantity);
+            await product.save();
+
+            // Sync back to Google Sheets
+            googleSheetsService
+              .updateProductStock(
+                store.googleSheetId,
+                product.name,
+                product.stock,
+              )
+              .catch((err) =>
+                console.error(
+                  "❌ Sheets inventory update failed:",
+                  err.message,
+                ),
+              );
+          }
+        }
+
         const populatedOrder = await Order.findById(order._id).populate(
           "customer",
         );

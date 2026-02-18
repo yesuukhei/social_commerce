@@ -88,9 +88,159 @@ class GoogleSheetsService {
       console.log(`✅ Order ${order._id} synced to Google Sheets successfully`);
     } catch (error) {
       console.error("❌ Error syncing to Google Sheets:", error.message);
-      if (error.response) {
-        console.error("API Error Data:", error.response.data);
+    }
+  }
+
+  /**
+   * Fetch and sync products from a spreadsheet to the database
+   * @param {string} storeId - The store ID to link products to
+   * @param {string} sheetId - The spreadsheet ID
+   * @returns {Object} Sync results (count, errors)
+   */
+  async syncProductsFromSheet(storeId, sheetId = null) {
+    try {
+      const Product = require("../models/Product"); // Local require to avoid circular dependencies if any
+      await this.init(sheetId);
+      if (!this.initialized) throw new Error("Google Sheets not initialized");
+
+      let sheet =
+        this.doc.sheetsByTitle["Products"] ||
+        this.doc.sheetsByTitle["Бараа"] ||
+        this.doc.sheetsByIndex[0];
+
+      const rows = await sheet.getRows();
+      console.log(`🔄 Syncing ${rows.length} rows from sheet: ${sheet.title}`);
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Make sure "AI Status" column exists by checking headers
+      await sheet.loadHeaderRow();
+      if (!sheet.headerValues.includes("AI Status")) {
+        // We can't easily add columns via this lib without clear header management
+        // but it will work if the user added it. For now, we just check.
+        console.warn("⚠️ 'AI Status' column not found in sheet");
       }
+
+      for (const row of rows) {
+        try {
+          const name = row.get("Нэр") || row.get("Name") || row.get("Product");
+          if (!name || name.trim() === "") continue;
+
+          let priceStr = String(row.get("Үнэ") || row.get("Price") || "0");
+          let stockStr = String(row.get("Үлдэгдэл") || row.get("Stock") || "0");
+
+          // 1. Robust Sanitization: Extract only digits (handles 50k, 10,000₮, etc.)
+          const price = parseFloat(priceStr.replace(/[^0-9.]/g, ""));
+          const stock = parseInt(stockStr.replace(/[^0-9]/g, ""));
+
+          const description =
+            row.get("Тайлбар") || row.get("Description") || "";
+          const category = row.get("Төрөл") || row.get("Category") || "";
+
+          // 2. Upsert in Database (Sync-then-Serve)
+          await Product.findOneAndUpdate(
+            { store: storeId, name: name.trim() },
+            {
+              store: storeId,
+              name: name.trim(),
+              description,
+              price: isNaN(price) ? 0 : price,
+              stock: isNaN(stock) ? 0 : stock,
+              category,
+              isActive: true,
+            },
+            { upsert: true, new: true },
+          );
+
+          // 3. Status Feedback
+          if (sheet.headerValues.includes("AI Status")) {
+            row.set(
+              "AI Status",
+              `✅ Synced: ${new Date().toLocaleTimeString()}`,
+            );
+            await row.save();
+          }
+
+          successCount++;
+        } catch (rowError) {
+          console.error(`❌ Error syncing row: ${rowError.message}`);
+          errorCount++;
+        }
+      }
+
+      console.log(
+        `✅ Sync Completed: ${successCount} success, ${errorCount} errors`,
+      );
+      return { successCount, errorCount };
+    } catch (error) {
+      console.error("❌ Product Sync Error:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Update a specific product's stock in the Google Sheet (Two-Way Sync)
+   * Called when an order is placed to keep Sheets updated
+   */
+  async updateProductStock(sheetId, productName, newStock) {
+    try {
+      await this.init(sheetId);
+      if (!this.initialized) return;
+
+      let sheet =
+        this.doc.sheetsByTitle["Products"] ||
+        this.doc.sheetsByTitle["Бараа"] ||
+        this.doc.sheetsByIndex[0];
+
+      const rows = await sheet.getRows();
+      const row = rows.find(
+        (r) => (r.get("Нэр") || r.get("Name")) === productName,
+      );
+
+      if (row) {
+        const stockKey =
+          row.get("Үлдэгдэл") !== undefined ? "Үлдэгдэл" : "Stock";
+        row.set(stockKey, newStock);
+        row.set("AI Status", `📦 Order: ${new Date().toLocaleTimeString()}`);
+        await row.save();
+        console.log(
+          `✅ Sheets stock updated for: ${productName} -> ${newStock}`,
+        );
+      }
+    } catch (error) {
+      console.error("❌ Error updating Sheets stock:", error.message);
+    }
+  }
+
+  /**
+   * Legacy method - kept for backward compatibility but enhanced
+   */
+  async getProductsFromSheet(sheetId) {
+    try {
+      await this.init(sheetId);
+      if (!this.initialized) return [];
+
+      let sheet =
+        this.doc.sheetsByTitle["Products"] ||
+        this.doc.sheetsByTitle["Бараа"] ||
+        this.doc.sheetsByIndex[0];
+
+      const rows = await sheet.getRows();
+
+      return rows
+        .map((row) => ({
+          name: row.get("Нэр") || row.get("Name"),
+          price: parseFloat(row.get("Үнэ") || row.get("Price") || 0),
+          stock: parseInt(row.get("Үлдэгдэл") || row.get("Stock") || 0),
+          category: row.get("Төрөл") || row.get("Category"),
+          description: row.get("Тайлбар") || row.get("Description"),
+          isActive: true,
+        }))
+        .filter((p) => p.name);
+    } catch (error) {
+      console.error("❌ Error fetching products from Sheets:", error.message);
+      return [];
     }
   }
 }
