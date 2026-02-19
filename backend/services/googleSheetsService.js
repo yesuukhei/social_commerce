@@ -11,6 +11,48 @@ class GoogleSheetsService {
   }
 
   /**
+   * Extract Spreadsheet ID from a full Google Sheets URL
+   */
+  extractSheetId(url) {
+    if (!url) return null;
+    const matches = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    return matches ? matches[1] : url;
+  }
+
+  /**
+   * Verify if the service has access to the sheet and check its structure
+   */
+  async verifySheetAccess(sheetId) {
+    try {
+      await this.init(sheetId);
+      if (!this.initialized) throw new Error("Could not initialize connection");
+
+      const productsSheet =
+        this.doc.sheetsByTitle["Products"] ||
+        this.doc.sheetsByTitle["Бараа"] ||
+        this.doc.sheetsByIndex[0];
+
+      await productsSheet.loadHeaderRow();
+
+      return {
+        success: true,
+        title: this.doc.title,
+        sheetName: productsSheet.title,
+        headers: productsSheet.headerValues,
+        rowCount: productsSheet.rowCount,
+      };
+    } catch (error) {
+      console.error("❌ Sheet Verification Failed:", error.message);
+      return {
+        success: false,
+        message: error.message.includes("403")
+          ? "Эрх чөлөөгүй (403). Манай и-мэйлд 'Editor' эрх өгнө үү."
+          : "Spreadsheet олдсонгүй эсвэл ID буруу байна.",
+      };
+    }
+  }
+
+  /**
    * Initialize the Google Spreadsheet connection
    * @param {string} sheetId - Optional specific sheet ID to load
    */
@@ -22,12 +64,18 @@ class GoogleSheetsService {
       if (this.initialized && this.doc?.spreadsheetId === spreadsheetId) return;
 
       const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-      const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+      let privateKey = process.env.GOOGLE_PRIVATE_KEY;
 
       if (!serviceAccountEmail || !privateKey || !spreadsheetId) {
         console.warn("⚠️ Google Sheets credentials missing");
         return;
       }
+
+      // Handle both literal \n and escaped \\n, and remove extra quotes if any
+      privateKey = privateKey
+        .replace(/^"|"$/g, "") // Remove wrapping quotes
+        .replace(/\\n/g, "\n") // Convert escaped newlines
+        .trim();
 
       const auth = new JWT({
         email: serviceAccountEmail,

@@ -41,6 +41,8 @@ app.get("/health", (req, res) => {
 app.use("/api/webhook", require("./routes/webhook"));
 app.use("/api/orders", require("./routes/orders"));
 app.use("/api/sync", require("./routes/sync"));
+app.use("/api/stores", require("./routes/stores"));
+app.use("/api/stats", require("./routes/stats"));
 // app.use('/api/customers', require('./routes/customers'));
 
 // Root endpoint
